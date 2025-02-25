@@ -1,0 +1,373 @@
+// Custom WooCommerce checkout fields - Remove unnecessary fields
+add_filter( 'woocommerce_checkout_fields', 'custom_remove_woo_checkout_fields' );
+function custom_remove_woo_checkout_fields( $fields ) {
+    // Remove billing fields
+    $fields['billing']['billing_last_name']['required'] = false;
+    $fields['billing']['billing_email']['required'] = false;
+    unset($fields['billing']['billing_company']);
+    unset($fields['billing']['billing_address_2']);
+    unset($fields['billing']['billing_postcode']);
+
+
+
+
+    // Remove shipping fields
+    $fields['shipping']['shipping_last_name']['required'] = false;
+    unset($fields['shipping']['shipping_company']);
+    unset($fields['shipping']['shipping_postcode']);
+    return $fields;
+}
+
+
+
+
+// Override default address field for city
+add_filter( 'woocommerce_default_address_fields', 'override_default_address_fields' );
+function override_default_address_fields( $address_fields ) {
+    $address_fields['city']['label'] = __('Thana/Upazila/Nearest Location', 'woocommerce');
+    return $address_fields;
+}
+
+
+
+
+// Limit WooCommerce phone field to 11 digits
+add_action('woocommerce_checkout_process', 'didar_custom_checkout_field_process');
+function didar_custom_checkout_field_process() {
+    if ( !preg_match('/^[0-9]{11}$/D', $_POST['billing_phone'] )) {
+        wc_add_notice( "Incorrect Mobile Number! Please enter a valid 11-digit Mobile number", 'error' );
+    }
+}
+
+
+
+
+// Display call-for-price button when product price is empty
+add_filter('woocommerce_empty_price_html', 'custom_call_for_price');
+function custom_call_for_price() {
+    return '<a href="tel:01840951274" class="custom-number"><i class="fa fa-phone-square"></i> 01840-951274</a>
+            <a href="tel:01840951274" class="custom-number-text"><i class="fa fa-phone-square"></i><b> Call for Price</b></a>';
+}
+
+
+
+//payment_gateways_based_on_chosen_shipping_method
+function filter_available_payment_gateways($gateways){
+    // Check if Flat Rate 2 or 8 is chosen as the shipping method
+    if(isset(WC()->session) && isset(WC()->session->chosen_shipping_methods)){
+        $chosen_shipping_method = WC()->session->chosen_shipping_methods[0];
+        
+        if($chosen_shipping_method == 'flat_rate:8'){
+           unset($gateways['cod']); // Remove Cash on Delivery (cod) gateway
+        }elseif($chosen_shipping_method == 'flat_rate:9'){
+            unset($gateways['bacs']); // Remove Bank Transfer (bacs) gateway
+        }
+    }
+    
+    return $gateways;
+}
+add_filter('woocommerce_available_payment_gateways', 'filter_available_payment_gateways');
+
+// Apply a 5% discount if the customer selects bKash and the shipping method is inside Dhaka
+function apply_bkash_discount_for_dhaka_customers($cart) {
+    if (is_admin() || !is_checkout()) {
+        return;
+    }
+
+    // Variables for Inside Dhaka and bKash identifiers
+    $inside_dhaka_shipping = 'flat_rate:9'; // Replace 'flat_rate:9' with your Inside Dhaka shipping method ID
+    $bkash_payment = 'bkash-for-woocommerce'; // Replace with your bKash payment method ID
+
+    // Get the chosen shipping and payment methods
+    $chosen_methods = WC()->session->get('chosen_shipping_methods');
+    $selected_payment_method = WC()->session->get('chosen_payment_method');
+
+    // Check if the selected shipping method is Inside Dhaka and payment method is bKash
+    if (isset($chosen_methods[0]) && $chosen_methods[0] === $inside_dhaka_shipping && $selected_payment_method === $bkash_payment) {
+        // Calculate a 5% discount
+        $discount = $cart->get_subtotal() * 0.05;
+        // Apply the discount
+        $cart->add_fee(__('5% Discount for bKash Payment (Inside Dhaka)', 'your-textdomain'), -$discount);
+    }
+}
+add_action('woocommerce_cart_calculate_fees', 'apply_bkash_discount_for_dhaka_customers');
+
+// Save the selected payment method to the session
+function save_selected_payment_method_to_session() {
+    if (isset($_POST['payment_method'])) {
+        WC()->session->set('chosen_payment_method', sanitize_text_field($_POST['payment_method']));
+    }
+}
+add_action('woocommerce_checkout_update_order_review', 'save_selected_payment_method_to_session');
+
+// Enqueue custom JavaScript to refresh checkout on payment method change
+function enqueue_payment_method_refresh_script() {
+    if (is_checkout()) {
+        ?>
+        <script type="text/javascript">
+            jQuery(function($) {
+                $('form.checkout').on('change', 'input[name="payment_method"]', function() {
+                    // Trigger checkout update to instantly reflect any discount changes
+                    $('body').trigger('update_checkout');
+                });
+            });
+        </script>
+        <?php
+    }
+}
+add_action('wp_footer', 'enqueue_payment_method_refresh_script');
+
+function conditional_deposit_display_on_shipping_method() {
+    if (is_checkout()) {
+        ?>
+        <script type="text/javascript">
+            jQuery(function($) {
+                // Function to check and toggle deposit options visibility
+                function toggleDepositOptions() {
+                    let selectedShippingMethod = $('input[name="shipping_method[0]"]:checked').val();
+                    
+                    // Toggle visibility based on selected shipping method
+                    if (selectedShippingMethod === 'flat_rate:9') {
+                        $('#wc-deposits-options-form').hide();
+                    } else if (selectedShippingMethod === 'flat_rate:8') {
+                        $('#wc-deposits-options-form').show();
+                    }
+                }
+
+                // Initial check on page load
+                toggleDepositOptions();
+
+                // Event listener for shipping method change
+                $('form.checkout').on('change', 'input[name="shipping_method[0]"]', function() {
+                    toggleDepositOptions();
+                });
+
+                // Re-check deposit options after WooCommerce AJAX updates
+                $(document.body).on('updated_checkout updated_shipping_method', function() {
+                    toggleDepositOptions();
+                });
+            });
+        </script>
+        <?php
+    }
+}
+add_action('wp_footer', 'conditional_deposit_display_on_shipping_method');
+
+
+//search animation
+function custom_search_type_animation() {
+    ?>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var searchInput = document.querySelector('.s');
+            var placeholderText = "Search your products";
+            var i = 0;
+
+            function typeWriter() {
+                if (i < placeholderText.length) {
+                    searchInput.setAttribute("placeholder", placeholderText.substring(0, i + 1));
+                    i++;
+                    setTimeout(typeWriter, 100);
+                } else {
+                    // Reset after finishing and start again
+                    setTimeout(function () {
+                        i = 0;
+                        searchInput.setAttribute("placeholder", ""); // Clear placeholder before restarting
+                        typeWriter();
+                    }, 1000); // Pause before restarting
+                }
+            }
+
+            typeWriter();
+        });
+    </script>
+    <?php
+}
+add_action('wp_footer', 'custom_search_type_animation');
+
+
+add_filter( 'gettext', 'customizing_variable_product_message', 97, 3 );
+function customizing_variable_product_message( $translated_text, $untranslated_text, $domain ) {
+    if ($untranslated_text == 'Please select some product options before adding this product to your cart.') {
+        $translated_text = __( 'Warning !!⚠️ 
+Select Color & Model Properly.', $domain );
+    }
+    return $translated_text;
+}
+
+
+add_filter('woocommerce_dropdown_variation_attribute_options_args', 'custom_default_variation', 10, 1);
+function custom_default_variation( $args ) {
+    if ( is_product() && $args['attribute'] == 'pa_model' ) {
+        // Set default value for attribute_pa_model to iPhone 16 Pro max
+        $args['selected'] = 'iphone-16-pro-max';
+    }
+    return $args;
+}
+
+
+
+// Change WooCommerce currency symbol from ৳ to BDT
+add_filter( 'woocommerce_currency_symbol', 'change_bdt_currency_symbol', 10, 2 );
+
+function change_bdt_currency_symbol( $currency_symbol, $currency ) {
+    if( $currency === 'BDT' ) {
+        $currency_symbol = 'BDT';
+    }
+    return $currency_symbol;
+}
+
+
+
+function disable_copy_and_right_click() {
+    ?>
+    <script type="text/javascript">
+        document.addEventListener('DOMContentLoaded', function() {
+            // Disable right-click
+            document.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+            });
+
+            // Disable text selection
+            document.addEventListener('selectstart', function(e) {
+                e.preventDefault();
+            });
+
+            // Disable drag and drop for all elements
+            document.addEventListener('dragstart', function(e) {
+                e.preventDefault();
+            });
+
+            // Disable keyboard shortcuts for copying, saving, view source, and printing
+            document.addEventListener('keydown', function(e) {
+                // Disable Ctrl+C, Ctrl+S, Ctrl+U, Ctrl+P, Ctrl+A
+                if (e.ctrlKey && (e.key === 'c' || e.key === 's' || e.key === 'u' || e.key === 'p' || e.key === 'a')) {
+                    e.preventDefault();
+                }
+                // Disable F12 (Developer Tools)
+                if (e.key === 'F12') {
+                    e.preventDefault();
+                }
+                // Disable Ctrl+Shift+I, Ctrl+Shift+J, and Ctrl+Shift+C
+                if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) {
+                    e.preventDefault();
+                }
+            });
+
+            // Disable touch events for image download/save on mobile devices
+            document.querySelectorAll('img').forEach(function(img) {
+                img.style.pointerEvents = 'none';
+                img.style.opacity = '1';
+
+                // Prevents long-press on iOS
+                img.addEventListener('touchstart', function(e) {
+                    e.preventDefault();
+                });
+                img.addEventListener('touchend', function(e) {
+                    e.preventDefault();
+                });
+                img.addEventListener('touchmove', function(e) {
+                    e.preventDefault();
+                });
+            });
+        });
+    </script>
+    <?php
+}
+add_action('wp_head', 'disable_copy_and_right_click');
+
+
+
+// Restrict Access to Certain Admin Pages for Shop Managers
+add_action('admin_init', function() {
+    if (current_user_can('shop_manager') && !current_user_can('administrator')) {
+        remove_menu_page('edit.php');
+       remove_menu_page('edit.php?post_type=page');
+        remove_menu_page('edit-comments.php'); 
+        remove_menu_page('users.php'); 
+        remove_menu_page('tools.php'); 
+        remove_menu_page('options-general.php'); 
+        remove_menu_page('plugins.php');
+        remove_menu_page('themes.php');
+        remove_menu_page('edit.php?post_type=shop_order');
+        remove_menu_page('woocommerce'); 
+       	remove_menu_page('edit.php?post_type=elementor_library');
+       	remove_menu_page('edit.php?post_type=warranty');
+        remove_menu_page('edit.php?post_type=cms_block');
+        remove_menu_page('edit.php?post_type=woodmart_slider');
+        remove_menu_page('edit.php?post_type=woodmart_sidebar');
+	    remove_menu_page('wf_woocommerce_packing_list');
+        remove_menu_page('admin.php?page=wc-admin&task=payments');
+        remove_menu_page('wholesale-suite'); 
+        remove_menu_page('page=wc-admin&path=%2Fanalytics%2Foverview');
+        remove_menu_page('edit.php?post_type=woodmart_slide'); 
+        remove_menu_page('edit.php?post_type=woodmart_layout');
+        
+        $restricted_pages = [
+            'edit.php?post_type=page',                    // Pages
+            'post-new.php?post_type=page',
+            'widgets.php',
+            'nav-menus.php',
+            'page=wc-settings&tab=site-visibility',
+            'customize.php?url=https%3A%2F%2Fcoversline.com%2F',
+            'post.php?post=66&action=edit',
+            'edit-comments.php',                          // Comments
+            'users.php',                                  // Users
+            'tools.php',                                  // Tools
+            'options-general.php',                        // Settings
+            'plugins.php',                                // Plugins
+            'themes.php',                                 // Appearance
+            'edit.php?post_type=shop_order',              // WooCommerce Orders
+            'edit.php?post_type=elementor_library',       // Elementor Templates
+            'edit.php?post_type=warranty',                // Warranty
+            'edit.php?post_type=cms_block',               // CMS Block
+            'post-new.php?post_type=cms_block',
+            'edit.php?post_type=woodmart_slide',         // Woodmart Slider
+            'edit.php?post_type=woodmart_sidebar',        // Woodmart Sidebar
+            'edit.php?post_type=woodmart_layout',
+            'edit.php?post_type=elementor_library&tabs_group=library',
+            'edit.php?post_type=elementor_library#add_new',
+            'edit-tags.php?taxonomy=elementor_library_category&post_type=elementor_library',
+            'edit-tags.php?taxonomy=category',
+            'edit-tags.php?taxonomy=post_tag',
+            'post-new.php?post_type=warranty',
+            'post-new.php?post_type=woodmart_layout',
+            'edit-tags.php?taxonomy=cms_block_cat&post_type=cms_block',
+            'post-new.php?post_type=woodmart_slide',
+            'edit-tags.php?taxonomy=woodmart_slider&post_type=woodmart_slide',
+            'post-new.php?post_type=woodmart_sidebar',
+            'admin.php?page=wc-settings&tab=checkout&section=bkash-for-woocommerce',
+            'wp-admin/admin.php?page=wpseo_workouts',
+            'admin.php?page=wc-admin&path=/marketing',
+            'edit.php?post_type=shop_coupon',
+            'admin.php?page=advanced-coupons-marketing',
+            'edit-tags.php?taxonomy=wcdp_payment_plan&post_type=product',
+            'edit.php?post_type=woodmart_woo_fbt',
+            'edit.php?post_type=product&page=product-reviews',
+            'edit.php?post_type=product&page=xts-wishlist-settings-page',
+            'post-new.php?post_type=woodmart_woo_fbt',
+            'post-new.php?post_type=elementor_library',
+            'post-new.php?post_type=woodmart_woo_lv',
+            ];
+
+        // Get the current page
+        $current_page = $_SERVER['REQUEST_URI'];
+
+        foreach ($restricted_pages as $page) {
+            if (strpos($current_page, $page) !== false) {
+                // Restrict access by showing a permissions error
+                wp_die(__('You do not have sufficient permissions to access this page, for More Permission Contact With <b>Mr. Rakibul Islam</b>', 'textdomain'));
+            }
+        }
+    }
+});
+
+
+
+
+// Footer year shortcode
+function year_shortcode() {
+    $year = date('Y');
+    return $year;
+}
+add_shortcode('year', 'year_shortcode');
